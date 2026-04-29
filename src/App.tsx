@@ -3,6 +3,7 @@ import { ButlerMessage } from './components/ButlerMessage';
 import { DropZone } from './components/DropZone';
 import { EditorFrame } from './components/EditorFrame';
 import { Footer } from './components/Footer';
+import { HowToUse } from './components/HowToUse';
 import { Toolbar } from './components/Toolbar';
 import { exportHtml } from './lib/exportHtml';
 import { injectRevealStyle, removeRevealStyle } from './lib/revealHidden';
@@ -85,14 +86,15 @@ export default function App() {
             HTMLの軽微な修正を、執事ジーヴスがお手伝いいたします。
           </p>
         </header>
-        <main className="flex-1 flex flex-col items-center justify-center px-6 py-10">
+        <main className="flex-1 flex flex-col items-center px-6 py-10">
           <div className="w-full max-w-2xl flex flex-col gap-6">
             <DropZone onLoaded={handleLoaded} onError={setErrorMessage} />
             <ButlerMessage tone={errorMessage ? 'error' : 'normal'}>
               {errorMessage ?? INITIAL_MESSAGE}
             </ButlerMessage>
+            <HowToUse />
           </div>
-          <div className="mt-10 text-xs text-butler-ink/50">
+          <div className="mt-6 text-xs text-butler-ink/50">
             お試し用サンプル：
             <a
               href="/sample/sample-lp.html"

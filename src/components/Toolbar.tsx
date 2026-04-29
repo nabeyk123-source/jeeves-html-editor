@@ -84,16 +84,18 @@ export function Toolbar({
         <button
           type="button"
           onClick={onReset}
-          className="px-3 py-1.5 text-sm rounded border border-butler-paper/25 text-butler-paper/90 hover:bg-butler-paper/10 hover:text-butler-paper transition"
+          className="px-3 py-1.5 rounded border border-butler-paper/25 text-butler-paper/90 hover:bg-butler-paper/10 hover:text-butler-paper transition leading-tight text-center"
         >
-          リセット
+          <span className="block text-sm">リセット</span>
+          <span className="block text-xs opacity-60">（最初から）</span>
         </button>
         <button
           type="button"
           onClick={onDownload}
-          className="px-4 py-1.5 text-sm font-medium rounded bg-butler-gold text-butler-ink hover:bg-butler-gold-deep hover:text-butler-paper transition"
+          className="px-4 py-1.5 font-medium rounded bg-butler-gold text-butler-ink hover:bg-butler-gold-deep hover:text-butler-paper transition leading-tight text-center"
         >
-          お仕上げいただく
+          <span className="block text-sm">お仕上げいただく</span>
+          <span className="block text-xs opacity-70">（ダウンロード）</span>
         </button>
       </div>
     </header>
