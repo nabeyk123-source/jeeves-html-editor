@@ -1,162 +1,201 @@
 import { describe, it, expect } from 'vitest';
 import { exportHtml } from '../exportHtml';
 
-function makeDoc(): Document {
-  return document.implementation.createHTMLDocument('test');
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+const reparse = (html: string) =>
+  new DOMParser().parseFromString(html, 'text/html');
+
+/**
+ * Build a minimal editedDoc that simulates what injectEditor produces.
+ * Each element gets data-jeeves-idx and, if edited, data-jeeves-changed.
+ */
+function makeEditedDoc(bodyHtml = ''): Document {
+  return new DOMParser().parseFromString(
+    `<!DOCTYPE html><html><head></head><body>${bodyHtml}</body></html>`,
+    'text/html',
+  );
 }
 
-function reparse(html: string): Document {
-  return new DOMParser().parseFromString(html, 'text/html');
+function makeOriginalHtml(bodyHtml = ''): string {
+  return `<!DOCTYPE html><html><head></head><body>${bodyHtml}</body></html>`;
 }
 
-describe('exportHtml', () => {
-  it('removes contenteditable="true" from elements', () => {
-    const doc = makeDoc();
-    const p = doc.createElement('p');
-    p.setAttribute('contenteditable', 'true');
-    p.textContent = 'hello';
-    doc.body.appendChild(p);
+// ─── core sync behaviour ─────────────────────────────────────────────────────
 
-    const out = reparse(exportHtml(doc));
-    const exported = out.querySelector('p')!;
-    expect(exported.hasAttribute('contenteditable')).toBe(false);
+describe('innerHTML sync', () => {
+  it('applies edited text to the matching element in the original HTML', () => {
+    const editedDoc = makeEditedDoc(
+      '<p data-jeeves-idx="0" data-jeeves-changed="">edited text</p>',
+    );
+    const originalHtml = makeOriginalHtml('<p>original text</p>');
+
+    const out = reparse(exportHtml(editedDoc, originalHtml));
+    expect(out.querySelector('p')?.textContent).toBe('edited text');
   });
 
-  it('removes .jeeves-editing class but preserves unrelated classes', () => {
-    const doc = makeDoc();
-    const p = doc.createElement('p');
-    p.className = 'important jeeves-editing';
-    doc.body.appendChild(p);
+  it('leaves unedited elements untouched in the output', () => {
+    // idx 0 is changed, idx 1 is not
+    const editedDoc = makeEditedDoc(
+      '<h1 data-jeeves-idx="0" data-jeeves-changed="">New Title</h1>' +
+        '<p data-jeeves-idx="1">unchanged</p>',
+    );
+    const originalHtml = makeOriginalHtml(
+      '<h1>Old Title</h1><p>unchanged</p>',
+    );
 
-    const out = reparse(exportHtml(doc));
-    const exported = out.querySelector('p')!;
-    expect(exported.classList.contains('jeeves-editing')).toBe(false);
-    expect(exported.classList.contains('important')).toBe(true);
+    const out = reparse(exportHtml(editedDoc, originalHtml));
+    expect(out.querySelector('h1')?.textContent).toBe('New Title');
+    expect(out.querySelector('p')?.textContent).toBe('unchanged');
   });
 
-  it('removes .jeeves-hover class', () => {
-    const doc = makeDoc();
-    const p = doc.createElement('p');
-    p.className = 'foo jeeves-hover';
-    doc.body.appendChild(p);
+  it('handles multiple edits correctly', () => {
+    const editedDoc = makeEditedDoc(
+      '<h1 data-jeeves-idx="0" data-jeeves-changed="">Title</h1>' +
+        '<p data-jeeves-idx="1" data-jeeves-changed="">Body</p>',
+    );
+    const originalHtml = makeOriginalHtml('<h1>Old</h1><p>Old body</p>');
 
-    const out = reparse(exportHtml(doc));
-    const exported = out.querySelector('p')!;
-    expect(exported.classList.contains('jeeves-hover')).toBe(false);
-    expect(exported.classList.contains('foo')).toBe(true);
+    const out = reparse(exportHtml(editedDoc, originalHtml));
+    expect(out.querySelector('h1')?.textContent).toBe('Title');
+    expect(out.querySelector('p')?.textContent).toBe('Body');
   });
 
-  it('removes the entire class attribute when only jeeves classes were present', () => {
-    const doc = makeDoc();
-    const p = doc.createElement('p');
-    p.className = 'jeeves-editing';
-    doc.body.appendChild(p);
-    const span = doc.createElement('span');
-    span.className = 'jeeves-hover';
-    doc.body.appendChild(span);
+  it('processes children before parents so parent copy includes child edit', () => {
+    // collectTargets: span is idx 0 (FIXED_SELECTOR), div is idx 1 (hasMixedContent auto)
+    // Both edited; parent div's innerHTML in the live editedDoc already contains the new span text.
+    const editedDoc = makeEditedDoc(
+      '<div data-jeeves-idx="1" data-jeeves-changed="">' +
+        'price: <span data-jeeves-idx="0" data-jeeves-changed="">¥2,000</span>' +
+        '</div>',
+    );
+    const originalHtml = makeOriginalHtml(
+      '<div>price: <span>¥1,000</span></div>',
+    );
 
-    const out = reparse(exportHtml(doc));
-    const exportedP = out.querySelector('p')!;
-    const exportedSpan = out.querySelector('span')!;
-    expect(exportedP.hasAttribute('class')).toBe(false);
-    expect(exportedSpan.hasAttribute('class')).toBe(false);
+    const out = reparse(exportHtml(editedDoc, originalHtml));
+    // Span edit arrives in parent's innerHTML; output should reflect ¥2,000
+    expect(out.querySelector('span')?.textContent).toBe('¥2,000');
+    expect(out.querySelector('div')?.textContent).toContain('¥2,000');
+  });
+
+  it('does not sync elements without data-jeeves-changed', () => {
+    const editedDoc = makeEditedDoc(
+      '<p data-jeeves-idx="0">edited but not marked changed</p>',
+    );
+    const originalHtml = makeOriginalHtml('<p>original</p>');
+
+    const out = reparse(exportHtml(editedDoc, originalHtml));
+    expect(out.querySelector('p')?.textContent).toBe('original');
+  });
+});
+
+// ─── original HTML preservation ──────────────────────────────────────────────
+
+describe('original HTML preservation', () => {
+  it('preserves <script> tags from the original HTML', () => {
+    const editedDoc = makeEditedDoc(
+      '<h1 data-jeeves-idx="0" data-jeeves-changed="">New</h1>',
+    );
+    const originalHtml = makeOriginalHtml(
+      '<script>var x = 1;</script><h1>Old</h1>',
+    );
+
+    const out = exportHtml(editedDoc, originalHtml);
+    expect(out).toContain('var x = 1;');
+  });
+
+  it('preserves onclick and other event attributes from the original HTML', () => {
+    const editedDoc = makeEditedDoc(
+      '<button data-jeeves-idx="0" data-jeeves-changed="">Buy</button>',
+    );
+    const originalHtml = makeOriginalHtml(
+      '<button onclick="order()">Order</button>',
+    );
+
+    const out = exportHtml(editedDoc, originalHtml);
+    expect(out).toContain('onclick="order()"');
+    expect(out).toContain('Buy');
+  });
+
+  it('does not mutate the editedDoc', () => {
+    const editedDoc = makeEditedDoc(
+      '<p data-jeeves-idx="0" data-jeeves-changed="" contenteditable="true">text</p>',
+    );
+    const originalHtml = makeOriginalHtml('<p>old</p>');
+
+    exportHtml(editedDoc, originalHtml);
+
+    // editedDoc should still have its original attributes intact
+    expect(
+      editedDoc.querySelector('[data-jeeves-changed]'),
+    ).not.toBeNull();
+  });
+});
+
+// ─── editor-artifact cleanup ─────────────────────────────────────────────────
+
+describe('editor artifact cleanup', () => {
+  it('strips data-jeeves-* attributes that arrive via innerHTML copy', () => {
+    // Edited parent copies innerHTML containing a child with jeeves attrs
+    const editedDoc = makeEditedDoc(
+      '<div data-jeeves-idx="0" data-jeeves-changed="">' +
+        '<span data-jeeves-idx="1" data-jeeves-target="">text</span>' +
+        '</div>',
+    );
+    const originalHtml = makeOriginalHtml('<div><span>old</span></div>');
+
+    const out = reparse(exportHtml(editedDoc, originalHtml));
+    expect(out.querySelector('[data-jeeves-idx]')).toBeNull();
+    expect(out.querySelector('[data-jeeves-target]')).toBeNull();
+  });
+
+  it('strips contenteditable that arrives via innerHTML copy', () => {
+    const editedDoc = makeEditedDoc(
+      '<div data-jeeves-idx="0" data-jeeves-changed="">' +
+        '<span contenteditable="true">editing</span>' +
+        '</div>',
+    );
+    const originalHtml = makeOriginalHtml('<div><span>old</span></div>');
+
+    const out = reparse(exportHtml(editedDoc, originalHtml));
+    expect(out.querySelector('[contenteditable]')).toBeNull();
   });
 
   it('removes <style data-jeeves-editor> but preserves user-defined <style>', () => {
-    const doc = makeDoc();
-    const userStyle = doc.createElement('style');
-    userStyle.textContent = 'body { color: red; }';
-    doc.head.appendChild(userStyle);
+    const editedDoc = makeEditedDoc('');
+    // Simulate original having a user style AND we inject an editor style into edited
+    // (in practice the editor style is only in editedDoc/iframe, not original)
+    const originalHtml = `<!DOCTYPE html><html><head>
+      <style>body { color: red; }</style>
+      <style data-jeeves-editor="">.jeeves-hover{}</style>
+    </head><body></body></html>`;
 
-    const editorStyle = doc.createElement('style');
-    editorStyle.setAttribute('data-jeeves-editor', '');
-    editorStyle.textContent = '.jeeves-hover { outline: 1px solid blue; }';
-    doc.head.appendChild(editorStyle);
-
-    const out = reparse(exportHtml(doc));
+    const out = reparse(exportHtml(editedDoc, originalHtml));
+    expect(out.querySelector('style[data-jeeves-editor]')).toBeNull();
     const styles = out.querySelectorAll('style');
     expect(styles.length).toBe(1);
-    expect(styles[0].textContent).toBe('body { color: red; }');
-    expect(out.querySelector('style[data-jeeves-editor]')).toBeNull();
+    expect(styles[0].textContent).toContain('color: red');
   });
 
-  it('removes the data-jeeves-original attribute', () => {
-    const doc = makeDoc();
-    const p = doc.createElement('p');
-    p.setAttribute('data-jeeves-original', '<b>before</b>');
-    p.textContent = 'after';
-    doc.body.appendChild(p);
+  it('removes <style data-jeeves-reveal>', () => {
+    const editedDoc = makeEditedDoc('');
+    const originalHtml = `<!DOCTYPE html><html><head>
+      <style>body { margin: 0; }</style>
+      <style data-jeeves-reveal="">[data-jeeves-hidden]{display:revert!important}</style>
+    </head><body></body></html>`;
 
-    const out = reparse(exportHtml(doc));
-    const exported = out.querySelector('p')!;
-    expect(exported.hasAttribute('data-jeeves-original')).toBe(false);
-  });
-
-  it('removes any other data-jeeves-* attributes', () => {
-    const doc = makeDoc();
-    const p = doc.createElement('p');
-    p.setAttribute('data-jeeves-foo', '1');
-    p.setAttribute('data-jeeves-bar', '2');
-    p.setAttribute('data-keep-me', 'ok');
-    doc.body.appendChild(p);
-
-    const out = reparse(exportHtml(doc));
-    const exported = out.querySelector('p')!;
-    expect(exported.hasAttribute('data-jeeves-foo')).toBe(false);
-    expect(exported.hasAttribute('data-jeeves-bar')).toBe(false);
-    expect(exported.getAttribute('data-keep-me')).toBe('ok');
-  });
-
-  it('reflects edited innerHTML in the output', () => {
-    const doc = makeDoc();
-    const p = doc.createElement('p');
-    p.textContent = 'old text';
-    doc.body.appendChild(p);
-
-    // Simulate the user editing the paragraph in place.
-    p.innerHTML = 'shiny new text';
-
-    const out = reparse(exportHtml(doc));
-    const exported = out.querySelector('p')!;
-    expect(exported.textContent).toBe('shiny new text');
-  });
-
-  it('does not mutate the original document', () => {
-    const doc = makeDoc();
-    const p = doc.createElement('p');
-    p.setAttribute('contenteditable', 'true');
-    p.className = 'jeeves-editing';
-    p.setAttribute('data-jeeves-original', 'x');
-    doc.body.appendChild(p);
-
-    exportHtml(doc);
-
-    // The source doc should still carry every editor marking.
-    expect(doc.querySelector('[contenteditable]')).not.toBeNull();
-    expect(doc.querySelector('.jeeves-editing')).not.toBeNull();
-    expect(doc.querySelector('[data-jeeves-original]')).not.toBeNull();
-  });
-
-  it('removes <style data-jeeves-reveal> but preserves user-defined <style>', () => {
-    const doc = makeDoc();
-    const userStyle = doc.createElement('style');
-    userStyle.textContent = 'body { margin: 0; }';
-    doc.head.appendChild(userStyle);
-
-    const revealStyle = doc.createElement('style');
-    revealStyle.setAttribute('data-jeeves-reveal', '');
-    revealStyle.textContent = '[data-jeeves-hidden] { display: revert !important; }';
-    doc.head.appendChild(revealStyle);
-
-    const out = reparse(exportHtml(doc));
+    const out = reparse(exportHtml(editedDoc, originalHtml));
     expect(out.querySelector('style[data-jeeves-reveal]')).toBeNull();
     expect(out.querySelectorAll('style').length).toBe(1);
-    expect(out.querySelectorAll('style')[0].textContent).toBe('body { margin: 0; }');
   });
+});
 
-  it('produces output that starts with <!DOCTYPE html>', () => {
-    const doc = makeDoc();
-    const out = exportHtml(doc);
+// ─── output format ───────────────────────────────────────────────────────────
+
+describe('output format', () => {
+  it('starts with <!DOCTYPE html>', () => {
+    const out = exportHtml(makeEditedDoc(''), makeOriginalHtml(''));
     expect(out.startsWith('<!DOCTYPE html>')).toBe(true);
   });
 });

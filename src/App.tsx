@@ -58,7 +58,7 @@ export default function App() {
     const doc = iframe?.contentDocument;
     if (!doc || !file) return;
 
-    const html = exportHtml(doc);
+    const html = exportHtml(doc, file.html);
     const baseName = file.name.replace(/\.html?$/i, '');
     const downloadName = `${baseName}_edited.html`;
 

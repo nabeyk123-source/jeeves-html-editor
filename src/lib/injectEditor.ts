@@ -1,16 +1,4 @@
-const FIXED_SELECTOR = 'h1,h2,h3,h4,h5,h6,p,span,a,button,li,td,th,dt,dd';
-
-// Decorative void elements that don't disqualify an element from text-leaf status
-const INLINE_VOID_TAGS = new Set(['BR', 'WBR']);
-
-// Tags that should never be auto-promoted as editable targets
-const EXCLUDED_TAGS = new Set([
-  'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE',
-  'META', 'LINK', 'TITLE', 'HEAD', 'BASE', 'SVG', 'MATH',
-  // Layout/structural containers — too noisy when clicked
-  'BODY', 'HTML', 'MAIN', 'ARTICLE', 'SECTION',
-  'HEADER', 'FOOTER', 'NAV', 'ASIDE', 'FORM', 'FIELDSET',
-]);
+import { collectTargets } from './editorTargets';
 
 const EDITOR_CSS = `
   [data-jeeves-target] {
@@ -30,63 +18,15 @@ const EDITOR_CSS = `
   }
 `;
 
-/**
- * Text-only leaf: all child elements (if any) are decorative void tags (br, wbr),
- * and the element has non-empty text content.
- * e.g. <div>Hello</div>  or  <div>Line 1<br>Line 2</div>
- */
-function isTextLeaf(el: HTMLElement): boolean {
-  if (EXCLUDED_TAGS.has(el.tagName)) return false;
-  for (const node of el.childNodes) {
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      if (!INLINE_VOID_TAGS.has((node as HTMLElement).tagName)) return false;
-    }
-  }
-  return (el.textContent?.trim().length ?? 0) > 0;
-}
-
-/**
- * Mixed content: has at least one non-whitespace direct text node child
- * AND at least one non-inline element child.
- * Making this editable lets users edit the bare text alongside nested elements.
- * e.g. <div>¥2,000 <span class="unit">/人</span></div>
- */
-function hasMixedContent(el: HTMLElement): boolean {
-  if (EXCLUDED_TAGS.has(el.tagName)) return false;
-  let hasElementChild = false;
-  let hasDirectText = false;
-  for (const node of el.childNodes) {
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      if (!INLINE_VOID_TAGS.has((node as HTMLElement).tagName)) hasElementChild = true;
-    } else if (node.nodeType === Node.TEXT_NODE) {
-      if ((node.textContent?.trim().length ?? 0) > 0) hasDirectText = true;
-    }
-  }
-  return hasElementChild && hasDirectText;
-}
-
 export function injectEditor(doc: Document): void {
   const style = doc.createElement('style');
   style.setAttribute('data-jeeves-editor', '');
   style.textContent = EDITOR_CSS;
   doc.head.appendChild(style);
 
-  // Fixed editable tags (per spec)
-  const fixedTargets = doc.querySelectorAll<HTMLElement>(FIXED_SELECTOR);
-
-  // Auto-detected targets: text-only leaves + mixed-content elements
-  const autoTargets: HTMLElement[] = [];
-  if (doc.body) {
-    doc.body.querySelectorAll<HTMLElement>('*').forEach((el) => {
-      if (isTextLeaf(el) || hasMixedContent(el)) autoTargets.push(el);
-    });
-  }
-
-  // Combine, deduplicating via Set
-  const targets = new Set<HTMLElement>([...fixedTargets, ...autoTargets]);
-
-  targets.forEach((el) => {
+  collectTargets(doc).forEach((el, idx) => {
     el.setAttribute('data-jeeves-target', '');
+    el.setAttribute('data-jeeves-idx', String(idx));
     el.addEventListener('click', handleClick);
     el.addEventListener('keydown', handleKeyDown);
     el.addEventListener('blur', handleBlur);
@@ -152,6 +92,13 @@ function handleKeyDown(this: HTMLElement, e: KeyboardEvent): void {
 function handleBlur(this: HTMLElement): void {
   const target = this;
   if (target.getAttribute('contenteditable') !== 'true') return;
+
+  // Mark as changed only if content actually differs from when edit started
+  const original = target.dataset.jeevesOriginal;
+  if (original !== undefined && target.innerHTML !== original) {
+    target.setAttribute('data-jeeves-changed', '');
+  }
+
   target.removeAttribute('contenteditable');
   target.classList.remove('jeeves-editing');
   delete target.dataset.jeevesOriginal;
