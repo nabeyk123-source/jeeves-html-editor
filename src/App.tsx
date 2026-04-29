@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { ButlerMessage } from './components/ButlerMessage';
 import { DropZone } from './components/DropZone';
 import { EditorFrame } from './components/EditorFrame';
+import { Footer } from './components/Footer';
 import { Toolbar } from './components/Toolbar';
 import { exportHtml } from './lib/exportHtml';
 import { injectRevealStyle, removeRevealStyle } from './lib/revealHidden';
@@ -102,6 +103,7 @@ export default function App() {
             </a>
           </div>
         </main>
+        <Footer />
       </div>
     );
   }
