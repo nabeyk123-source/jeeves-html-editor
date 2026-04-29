@@ -137,6 +137,23 @@ describe('exportHtml', () => {
     expect(doc.querySelector('[data-jeeves-original]')).not.toBeNull();
   });
 
+  it('removes <style data-jeeves-reveal> but preserves user-defined <style>', () => {
+    const doc = makeDoc();
+    const userStyle = doc.createElement('style');
+    userStyle.textContent = 'body { margin: 0; }';
+    doc.head.appendChild(userStyle);
+
+    const revealStyle = doc.createElement('style');
+    revealStyle.setAttribute('data-jeeves-reveal', '');
+    revealStyle.textContent = '[data-jeeves-hidden] { display: revert !important; }';
+    doc.head.appendChild(revealStyle);
+
+    const out = reparse(exportHtml(doc));
+    expect(out.querySelector('style[data-jeeves-reveal]')).toBeNull();
+    expect(out.querySelectorAll('style').length).toBe(1);
+    expect(out.querySelectorAll('style')[0].textContent).toBe('body { margin: 0; }');
+  });
+
   it('produces output that starts with <!DOCTYPE html>', () => {
     const doc = makeDoc();
     const out = exportHtml(doc);

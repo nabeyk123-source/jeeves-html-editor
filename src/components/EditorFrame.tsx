@@ -1,13 +1,15 @@
 import { useMemo, type RefObject } from 'react';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
 import { injectEditor } from '../lib/injectEditor';
+import { markHiddenElements } from '../lib/revealHidden';
 
 type Props = {
   html: string;
   iframeRef: RefObject<HTMLIFrameElement>;
+  onReady?: (hiddenCount: number) => void;
 };
 
-export function EditorFrame({ html, iframeRef }: Props) {
+export function EditorFrame({ html, iframeRef, onReady }: Props) {
   const sanitized = useMemo(() => sanitizeHtml(html), [html]);
 
   const handleLoad = () => {
@@ -15,6 +17,8 @@ export function EditorFrame({ html, iframeRef }: Props) {
     const doc = iframe?.contentDocument;
     if (!doc) return;
     injectEditor(doc);
+    const hiddenCount = markHiddenElements(doc);
+    onReady?.(hiddenCount);
   };
 
   return (

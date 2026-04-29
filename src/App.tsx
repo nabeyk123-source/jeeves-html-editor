@@ -4,20 +4,32 @@ import { DropZone } from './components/DropZone';
 import { EditorFrame } from './components/EditorFrame';
 import { Toolbar } from './components/Toolbar';
 import { exportHtml } from './lib/exportHtml';
+import { injectRevealStyle, removeRevealStyle } from './lib/revealHidden';
 import type { LoadedFile } from './types';
 
 const INITIAL_MESSAGE = '旦那様、編集なさりたいHTMLファイルをこちらへお預けください。';
 const EDITING_MESSAGE =
   'かしこまりました。テキストをクリックして、ご自由に書き換えてくださいませ。Enterキーで確定、Escキーで取り消しでございます。';
+const REVEAL_MESSAGE =
+  '全てのセクションをお見せしております。金色の枠線がついた部分が、元々非表示だったセクションでございます。';
 
 export default function App() {
   const [file, setFile] = useState<LoadedFile | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [hasHidden, setHasHidden] = useState(false);
+  const [revealActive, setRevealActive] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const handleLoaded = (loaded: LoadedFile) => {
     setErrorMessage(null);
+    setHasHidden(false);
+    setRevealActive(false);
     setFile(loaded);
+  };
+
+  const handleEditorReady = (hiddenCount: number) => {
+    setHasHidden(hiddenCount > 0);
+    setRevealActive(false);
   };
 
   const handleReset = () => {
@@ -25,6 +37,20 @@ export default function App() {
     if (!ok) return;
     setFile(null);
     setErrorMessage(null);
+    setHasHidden(false);
+    setRevealActive(false);
+  };
+
+  const handleToggleReveal = () => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+    if (revealActive) {
+      removeRevealStyle(doc);
+      setRevealActive(false);
+    } else {
+      injectRevealStyle(doc);
+      setRevealActive(true);
+    }
   };
 
   const handleDownload = () => {
@@ -82,10 +108,17 @@ export default function App() {
 
   return (
     <div className="h-full flex flex-col bg-butler-paper">
-      <Toolbar fileName={file.name} onReset={handleReset} onDownload={handleDownload} />
+      <Toolbar
+        fileName={file.name}
+        onReset={handleReset}
+        onDownload={handleDownload}
+        hasHidden={hasHidden}
+        revealActive={revealActive}
+        onToggleReveal={handleToggleReveal}
+      />
       <main className="flex-1 min-h-0 px-4 py-4 flex flex-col gap-3">
-        <EditorFrame html={file.html} iframeRef={iframeRef} />
-        <ButlerMessage>{EDITING_MESSAGE}</ButlerMessage>
+        <EditorFrame html={file.html} iframeRef={iframeRef} onReady={handleEditorReady} />
+        <ButlerMessage>{revealActive ? REVEAL_MESSAGE : EDITING_MESSAGE}</ButlerMessage>
       </main>
     </div>
   );
